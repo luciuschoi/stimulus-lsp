@@ -35,8 +35,8 @@ export function capitalize(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-export function importStatementForController(controllerDefinition: ControllerDefinition, project: Project) {
-  const importSource = importSourceForController(controllerDefinition, project)
+export function importStatementForController(controllerDefinition: ControllerDefinition, project: Project, useAbsolutePath: boolean = false) {
+  const importSource = importSourceForController(controllerDefinition, project, useAbsolutePath)
   const exportDeclaration = exportDeclarationFromControllerDefinition(controllerDefinition, project)
 
   if (!exportDeclaration) return { importStatement: undefined, localName: undefined, importSpecifier: undefined, importSource, exportDeclaration }
@@ -44,9 +44,11 @@ export function importStatementForController(controllerDefinition: ControllerDef
   return importStatementFromExportDeclaration(exportDeclaration, controllerDefinition, importSource)
 }
 
-export function importSourceForController(controllerDefinition: ControllerDefinition, project: Project) {
+export function importSourceForController(controllerDefinition: ControllerDefinition, project: Project, useAbsolutePath: boolean = false) {
   if (controllerDefinition.sourceFile.isProjectFile) {
-    return relativeControllersFilePath(project, controllerDefinition.sourceFile.path)
+    return useAbsolutePath 
+      ? absoluteControllersFilePath(project, controllerDefinition.sourceFile.path)
+      : relativeControllersFilePath(project, controllerDefinition.sourceFile.path)
   }
 
   const nodeModule = nodeModleForController(controllerDefinition, project)
@@ -103,6 +105,27 @@ export function relativeControllersFilePath(project: Project, filePath: string):
   )
 
   return controllerPath.startsWith(".") ? controllerPath : `./${controllerPath}`
+}
+
+export function absoluteControllersFilePath(project: Project, filePath: string): string {
+  if (project.controllersIndexFiles.length === 0) return ""
+
+  // 절대경로 생성: 프로젝트 루트를 기준으로 한 절대경로
+  const projectRoot = project.projectPath
+  const relativePath = path.relative(projectRoot, filePath)
+  
+  const fileName = path.basename(
+    relativePath,
+    path.extname(relativePath)
+  )
+
+  const controllerPath = path.join(
+    path.dirname(relativePath),
+    fileName
+  )
+
+  // 절대경로는 /로 시작
+  return controllerPath.startsWith("/") ? controllerPath : `/${controllerPath.replace(/\\/g, "/")}`
 }
 
 export function exportDeclarationFromControllerDefinition(controllerDefinition: ControllerDefinition, project: Project) {

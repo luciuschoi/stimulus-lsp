@@ -19,17 +19,19 @@ export class ControllerDefinitionsRequest {
   }
 
   async handleRequest(_request: ControllerDefinitionsRequestType): Promise<ControllerDefinitionsResponse> {
+    const useAbsolutePath = await this.service.getUseAbsolutePath()
+    
     return {
       registered: {
         name: "project",
-        controllerDefinitions: this.registeredControllers,
+        controllerDefinitions: await this.getRegisteredControllers(),
       },
       unregistered: {
         project: {
           name: "project",
-          controllerDefinitions: this.unregisteredControllers,
+          controllerDefinitions: await this.getUnregisteredControllers(useAbsolutePath),
         },
-        nodeModules: this.nodeModuleControllers,
+        nodeModules: await this.getNodeModuleControllers(useAbsolutePath),
       },
     }
   }
@@ -42,13 +44,13 @@ export class ControllerDefinitionsRequest {
     return Position.create(node?.loc?.start?.line || 1, node?.loc?.start?.column || 1)
   }
 
-  private mapControllerDefinition = (controllerDefinition: ControllerDefinition) => {
+  private mapControllerDefinition = (controllerDefinition: ControllerDefinition, useAbsolutePath: boolean = false) => {
     const { path, guessedIdentifier: identifier, classDeclaration } = controllerDefinition
 
     const registered = false
     const position = this.positionFromNode(classDeclaration.node)
 
-    const { localName, importStatement } = importStatementForController(controllerDefinition, this.service.project)
+    const { localName, importStatement } = importStatementForController(controllerDefinition, this.service.project, useAbsolutePath)
 
     return {
       path,
@@ -75,7 +77,9 @@ export class ControllerDefinitionsRequest {
   }
 
   private get registeredControllerPaths() {
-    return this.service.project.registeredControllers.map((c) => c.path)
+    const relativePathRegistered = this.service.project.registeredControllers.map((c) => c.path)
+    const absolutePathRegistered = Array.from(this.service.absolutePathRegisteredControllers)
+    return [...relativePathRegistered, ...absolutePathRegistered]
   }
 
   private get unregisteredControllerDefinitions() {
@@ -88,15 +92,43 @@ export class ControllerDefinitionsRequest {
     return this.service.project.detectedNodeModules
   }
 
-  private get registeredControllers() {
-    return this.service.project.registeredControllers.map(this.mapRegisteredController).sort(this.controllerSort)
+  private async getRegisteredControllers() {
+    const relativePathRegistered = this.service.project.registeredControllers.map(this.mapRegisteredController)
+    
+    // 절대경로로 등록된 컨트롤러도 추가
+    const absolutePathRegistered = Array.from(this.service.absolutePathRegisteredControllers)
+      .map((controllerPath) => {
+        const controllerDefinition = this.service.project.controllerDefinitions.find(
+          (def) => def.sourceFile.path === controllerPath
+        )
+        if (controllerDefinition) {
+          return this.mapRegisteredControllerFromDefinition(controllerDefinition)
+        }
+        return null
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+    
+    return [...relativePathRegistered, ...absolutePathRegistered].sort(this.controllerSort)
   }
 
-  private get unregisteredControllers() {
-    return this.unregisteredControllerDefinitions.map(this.mapControllerDefinition).sort(this.controllerSort)
+  private mapRegisteredControllerFromDefinition(controllerDefinition: ControllerDefinition) {
+    const { path, guessedIdentifier: identifier, classDeclaration } = controllerDefinition
+    const registered = true
+    const position = this.positionFromNode(classDeclaration.node)
+
+    return {
+      path,
+      identifier,
+      position,
+      registered,
+    }
   }
 
-  private get nodeModuleControllers() {
+  private async getUnregisteredControllers(useAbsolutePath: boolean) {
+    return this.unregisteredControllerDefinitions.map((def) => this.mapControllerDefinition(def, useAbsolutePath)).sort(this.controllerSort)
+  }
+
+  private async getNodeModuleControllers(useAbsolutePath: boolean) {
     // Stimulus-Use's controllers are "abstract" and meant to be extended. So we shouldn't suggest to register them.
     const excludeList = ["stimulus-use"]
 
@@ -107,7 +139,7 @@ export class ControllerDefinitionsRequest {
 
         const controllerDefinitions = detectedModule.controllerDefinitions
           .filter((definition) => !this.registeredControllerPaths.includes(definition.path))
-          .map(this.mapControllerDefinition)
+          .map((def) => this.mapControllerDefinition(def, useAbsolutePath))
           .sort(this.controllerSort)
 
         return { name, controllerDefinitions }

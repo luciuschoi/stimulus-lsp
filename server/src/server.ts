@@ -119,7 +119,7 @@ connection.onDidChangeWatchedFiles((params) => {
 })
 
 connection.onDefinition((params) => service.definitions.onDefinition(params))
-connection.onCodeAction((params) => service.codeActions.onCodeAction(params))
+connection.onCodeAction(async (params) => await service.codeActions.onCodeAction(params))
 connection.onCodeLens((params) => service.codeLens.onCodeLens(params))
 connection.onCodeLensResolve((codeLens) => service.codeLens.onCodeLensResolve(codeLens))
 

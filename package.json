@@ -4,11 +4,11 @@
   "description": "Intelligent Stimulus tooling",
   "license": "MIT",
   "pricing": "Free",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "icon": "icon.png",
-  "publisher": "marcoroth",
+  "publisher": "luciuschoi",
   "author": {
-    "name": "Marco Roth"
+    "name": "Lucius Choi"
   },
   "categories": [
     "Programming Languages",
@@ -21,9 +21,9 @@
     "Ruby on Rails"
   ],
   "sponsor": {
-    "url": "http://github.com/sponsors/marcoroth"
+    "url": "http://github.com/sponsors/luciuschoi"
   },
-  "repository": "https://github.com/marcoroth/stimulus-lsp",
+  "repository": "https://github.com/luciuschoi/stimulus-lsp",
   "engines": {
     "vscode": "^1.43.0"
   },
@@ -53,6 +53,12 @@
           ],
           "default": "verbose",
           "description": "Traces the communication between VS Code and the language server."
+        },
+        "languageServerStimulus.useAbsolutePaths": {
+          "scope": "window",
+          "type": "boolean",
+          "default": false,
+          "description": "Use absolute paths for controller imports (useful for Rails 8+ with Propshaft)."
         }
       }
     },

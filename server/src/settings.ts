@@ -1,6 +1,8 @@
 import { ClientCapabilities, Connection, InitializeParams } from "vscode-languageserver/node"
 
-export interface StimulusSettings {}
+export interface StimulusSettings {
+  useAbsolutePaths?: boolean
+}
 
 export class Settings {
   // The global settings, used when the `workspace/configuration` request is not supported by the client.

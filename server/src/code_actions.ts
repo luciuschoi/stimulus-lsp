@@ -7,19 +7,22 @@ import {
   DeprecatedPackageImportsDiagnosticData,
 } from "./diagnostics"
 import { importStatementForController } from "./utils"
+import { Service } from "./service"
 
 import { Project } from "stimulus-parser"
 
 export class CodeActions {
   private readonly documentService: DocumentService
   private readonly project: Project
+  private readonly service: Service
 
-  constructor(documentService: DocumentService, project: Project) {
+  constructor(documentService: DocumentService, project: Project, service: Service) {
     this.documentService = documentService
     this.project = project
+    this.service = service
   }
 
-  onCodeAction(params: CodeActionParams): CodeAction[] {
+  async onCodeAction(params: CodeActionParams): Promise<CodeAction[]> {
     const { diagnostics } = params.context
     if (diagnostics.length === 0) return []
 
@@ -37,7 +40,7 @@ export class CodeActions {
     ]
   }
 
-  private handleInvalidControllerDiagnostics(diagnostics: Diagnostic[]) {
+  private async handleInvalidControllerDiagnostics(diagnostics: Diagnostic[]) {
     return diagnostics.flatMap((diagnostic) => {
       const codeActions: CodeAction[] = []
       const { identifier, suggestion } = diagnostic.data as InvalidControllerDiagnosticData
@@ -94,8 +97,9 @@ export class CodeActions {
           .concat(nodeModulesControllers)
           .filter((controller) => controller.guessedIdentifier === identifier)
 
+        const useAbsolutePath = await this.service.getUseAbsolutePath()
         controllers.forEach((controller) => {
-          const { localName, importStatement, importSource } = importStatementForController(controller, this.project)
+          const { localName, importStatement, importSource } = importStatementForController(controller, this.project, useAbsolutePath)
 
           if (importStatement) {
             const registerTitle = `Register controller "${identifier}" from "${importSource}"`
