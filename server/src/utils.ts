@@ -3,6 +3,18 @@ import { levenshtein } from "./levenshtein"
 
 import type { Project, ExportDeclaration, ControllerDefinition } from "stimulus-parser"
 
+/** 경로 비교 시 일관된 형식으로 정규화 (절대경로, 슬래시 통일) */
+export function normalizePathForComparison(filePath: string, projectRoot?: string): string {
+  if (!filePath) return ""
+  let p = path.normalize(filePath)
+  if (projectRoot && !path.isAbsolute(p)) {
+    p = path.resolve(projectRoot, p)
+  } else if (projectRoot && path.isAbsolute(p)) {
+    p = path.normalize(p)
+  }
+  return p.replace(/\\/g, "/")
+}
+
 function rank(input: string, list: string[]) {
   return list
     .map((item) => {

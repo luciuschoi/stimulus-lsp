@@ -33,14 +33,20 @@ export class CodeActions {
     const invalidActionDiagnostics = diagnostics.filter((d) => d.code === "stimulus.controller.action.invalid")
     const deprecatedPackageImports = diagnostics.filter((d) => d.code === "stimulus.package.deprecated.import")
 
+    const invalidControllerActions = await this.handleInvalidControllerDiagnostics(invalidControllerDiagnostics)
+    const invalidActionActions = this.handleInvalidActionDiagnostics(invalidActionDiagnostics)
+    const deprecatedImportActions = this.handleDeprecatedPackageImports(deprecatedPackageImports)
+
     return [
-      ...this.handleInvalidControllerDiagnostics(invalidControllerDiagnostics),
-      ...this.handleInvalidActionDiagnostics(invalidActionDiagnostics),
-      ...this.handleDeprecatedPackageImports(deprecatedPackageImports),
+      ...invalidControllerActions,
+      ...invalidActionActions,
+      ...deprecatedImportActions,
     ]
   }
 
   private async handleInvalidControllerDiagnostics(diagnostics: Diagnostic[]) {
+    const useAbsolutePath = await this.service.getUseAbsolutePath()
+    
     return diagnostics.flatMap((diagnostic) => {
       const codeActions: CodeAction[] = []
       const { identifier, suggestion } = diagnostic.data as InvalidControllerDiagnosticData
@@ -97,7 +103,6 @@ export class CodeActions {
           .concat(nodeModulesControllers)
           .filter((controller) => controller.guessedIdentifier === identifier)
 
-        const useAbsolutePath = await this.service.getUseAbsolutePath()
         controllers.forEach((controller) => {
           const { localName, importStatement, importSource } = importStatementForController(controller, this.project, useAbsolutePath)
 

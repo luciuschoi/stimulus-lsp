@@ -18,7 +18,12 @@ export class CodeLensProvider {
 
     if (!textDocument) return []
 
-    const file = this.project.projectFiles.find((file) => `file://${file.path}` === textDocument.uri)
+    // 경로 정규화하여 비교
+    const normalizedUri = params.textDocument.uri.replace(/^file:\/\//, "").replace(/\\/g, "/")
+    const file = this.project.projectFiles.find((file) => {
+      const normalizedFilePath = file.path.replace(/\\/g, "/")
+      return normalizedFilePath === normalizedUri || `file://${normalizedFilePath}` === params.textDocument.uri
+    })
 
     if (!file) return []
     if (file.controllerDefinitions.length === 0) return []
@@ -28,6 +33,7 @@ export class CodeLensProvider {
 
       if (!loc) return []
 
+      // registeredControllers 확인
       const registeredController = this.project.registeredControllers.find(
         (registered) => registered.controllerDefinition === definition,
       )
@@ -68,7 +74,7 @@ export class CodeLensProvider {
 
     if (registered && registeredController) {
       codeLens.command = Command.create(
-        `Stimulus: Connects to data-controller="${registeredController.identifier}"`,
+        `Stimulus: Connects to data-controller="${identifier}"`,
         "",
       )
     } else {

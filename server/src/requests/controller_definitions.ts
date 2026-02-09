@@ -24,14 +24,14 @@ export class ControllerDefinitionsRequest {
     return {
       registered: {
         name: "project",
-        controllerDefinitions: await this.getRegisteredControllers(),
+        controllerDefinitions: this.getRegisteredControllers(),
       },
       unregistered: {
         project: {
           name: "project",
-          controllerDefinitions: await this.getUnregisteredControllers(useAbsolutePath),
+          controllerDefinitions: this.getUnregisteredControllers(useAbsolutePath),
         },
-        nodeModules: await this.getNodeModuleControllers(useAbsolutePath),
+        nodeModules: this.getNodeModuleControllers(useAbsolutePath),
       },
     }
   }
@@ -77,9 +77,7 @@ export class ControllerDefinitionsRequest {
   }
 
   private get registeredControllerPaths() {
-    const relativePathRegistered = this.service.project.registeredControllers.map((c) => c.path)
-    const absolutePathRegistered = Array.from(this.service.absolutePathRegisteredControllers)
-    return [...relativePathRegistered, ...absolutePathRegistered]
+    return this.service.project.registeredControllers.map((c) => c.path)
   }
 
   private get unregisteredControllerDefinitions() {
@@ -92,43 +90,15 @@ export class ControllerDefinitionsRequest {
     return this.service.project.detectedNodeModules
   }
 
-  private async getRegisteredControllers() {
-    const relativePathRegistered = this.service.project.registeredControllers.map(this.mapRegisteredController)
-    
-    // 절대경로로 등록된 컨트롤러도 추가
-    const absolutePathRegistered = Array.from(this.service.absolutePathRegisteredControllers)
-      .map((controllerPath) => {
-        const controllerDefinition = this.service.project.controllerDefinitions.find(
-          (def) => def.sourceFile.path === controllerPath
-        )
-        if (controllerDefinition) {
-          return this.mapRegisteredControllerFromDefinition(controllerDefinition)
-        }
-        return null
-      })
-      .filter((item): item is NonNullable<typeof item> => item !== null)
-    
-    return [...relativePathRegistered, ...absolutePathRegistered].sort(this.controllerSort)
+  private getRegisteredControllers() {
+    return this.service.project.registeredControllers.map(this.mapRegisteredController).sort(this.controllerSort)
   }
 
-  private mapRegisteredControllerFromDefinition(controllerDefinition: ControllerDefinition) {
-    const { path, guessedIdentifier: identifier, classDeclaration } = controllerDefinition
-    const registered = true
-    const position = this.positionFromNode(classDeclaration.node)
-
-    return {
-      path,
-      identifier,
-      position,
-      registered,
-    }
-  }
-
-  private async getUnregisteredControllers(useAbsolutePath: boolean) {
+  private getUnregisteredControllers(useAbsolutePath: boolean) {
     return this.unregisteredControllerDefinitions.map((def) => this.mapControllerDefinition(def, useAbsolutePath)).sort(this.controllerSort)
   }
 
-  private async getNodeModuleControllers(useAbsolutePath: boolean) {
+  private getNodeModuleControllers(useAbsolutePath: boolean) {
     // Stimulus-Use's controllers are "abstract" and meant to be extended. So we shouldn't suggest to register them.
     const excludeList = ["stimulus-use"]
 

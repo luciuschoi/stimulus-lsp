@@ -27,7 +27,7 @@ export class Service {
   project: Project
   codeLens: CodeLens
   config?: Config
-  absolutePathRegisteredControllers: Set<string> = new Set() // 절대경로로 등록된 컨트롤러 경로 추적
+  private indexFileBackups: Map<string, string> = new Map() // 원본 파일 내용 백업
 
   constructor(connection: Connection, params: InitializeParams) {
     this.connection = connection
@@ -38,7 +38,7 @@ export class Service {
     this.stimulusDataProvider = new StimulusHTMLDataProvider("id", this.project)
     this.diagnostics = new Diagnostics(this.connection, this.stimulusDataProvider, this.documentService, this.project, this)
     this.definitions = new Definitions(this.documentService, this.stimulusDataProvider)
-    this.commands = new Commands(this.project, this.connection, this)
+    this.commands = new Commands(this.project, this.connection)
     this.codeLens = new CodeLens(this.documentService, this.project)
 
     this.htmlLanguageService = getLanguageService({
@@ -47,16 +47,19 @@ export class Service {
   }
 
   async init() {
+    // index.js 파일의 controllers/ 경로를 ./로 임시 변환하여 Project가 인식하도록 함
+    await this.prepareIndexFileForParsing()
+
     await this.project.initialize()
 
     // TODO: we need to setup a file listener to check when new packages get installed
     await this.project.detectAvailablePackages()
     await this.project.analyzeAllDetectedModules()
 
-    this.config = await Config.fromPathOrNew(this.project.projectPath)
+    // Project 초기화 후 원본 파일 복원
+    await this.restoreIndexFiles()
 
-    // 절대경로 import를 파싱하여 컨트롤러 등록 감지
-    await this.detectAbsolutePathControllers()
+    this.config = await Config.fromPathOrNew(this.project.projectPath)
 
     // Only keep settings for open documents
     this.documentService.onDidClose((change) => {
@@ -66,98 +69,102 @@ export class Service {
     // The content of a text document has changed. This event is emitted
     // when the text document first opened or when its content has changed.
     this.documentService.onDidChangeContent((change) => {
+      // index.js 파일이 변경된 경우 controllers/ 경로를 ./로 임시 변환하고 프로젝트 새로고침
+      const filePath = change.document.uri.replace(/^file:\/\//, "")
+      if (filePath.endsWith("/controllers/index.js") || filePath.endsWith("/controllers/index.ts")) {
+        // 파일이 저장된 후 변환 (약간의 지연)
+        setTimeout(async () => {
+          await this.prepareIndexFileForParsing()
+          await this.project.refresh()
+          await this.restoreIndexFiles()
+        }, 100)
+      }
       this.diagnostics.refreshDocument(change.document)
     })
   }
 
   async getUseAbsolutePath(): Promise<boolean> {
-    // 설정에서 절대경로 사용 여부 확인
-    try {
-      const projectUri = `file://${this.project.projectPath}`
-      const settings = await this.settings.getDocumentSettings(projectUri)
-      return settings.useAbsolutePaths || false
-    } catch {
-      return false
-    }
+    // 절대경로 감지 로직을 제거했으므로 항상 false 반환
+    // index.js 파일의 controllers/ 경로는 ./로 변환되어 처리됨
+    return false
   }
 
-  async detectAbsolutePathControllers() {
-    // index.js 파일에서 절대경로 import를 파싱하여 컨트롤러 등록 감지
-    if (this.project.controllersIndexFiles.length === 0) return
+  async prepareIndexFileForParsing() {
+    // controllers index 파일 경로 찾기
+    const projectRoot = this.project.projectPath
+    const possibleIndexPaths = [
+      path.join(projectRoot, "app/javascript/controllers/index.js"),
+      path.join(projectRoot, "app/javascript/controllers/index.ts"),
+    ]
 
-    const indexFilePath = this.project.controllersIndexFiles[0].path
     const fs = await import("fs/promises")
     
-    try {
-      const content = await fs.readFile(indexFilePath, "utf-8")
-      await this.parseAbsolutePathImports(content, indexFilePath)
-    } catch (error) {
-      // 파일을 읽을 수 없는 경우 무시
+    for (const indexPath of possibleIndexPaths) {
+      try {
+        const content = await fs.readFile(indexPath, "utf-8")
+        
+        // 원본 내용 백업 (아직 백업하지 않은 경우만)
+        if (!this.indexFileBackups.has(indexPath)) {
+          this.indexFileBackups.set(indexPath, content)
+        }
+        
+        // controllers/로 시작하는 경로를 ./로 변환
+        // 예: import HelloController from "controllers/hello_controller" -> import HelloController from "./hello_controller"
+        // 예: import HelloController from "/controllers/hello_controller" -> import HelloController from "./hello_controller"
+        let transformedContent = content.replace(
+          /import\s+(?:(\w+)|(?:\{([^}]+)\}))\s+from\s+["']controllers\/([^"']+)["']/g,
+          (match, defaultImport, namedImports, controllerPath) => {
+            const importPart = defaultImport || (namedImports ? `{${namedImports}}` : "")
+            return `import ${importPart} from "./${controllerPath}"`
+          }
+        )
+        
+        // /controllers/로 시작하는 절대경로도 변환
+        transformedContent = transformedContent.replace(
+          /import\s+(?:(\w+)|(?:\{([^}]+)\}))\s+from\s+["']\/controllers\/([^"']+)["']/g,
+          (match, defaultImport, namedImports, controllerPath) => {
+            const importPart = defaultImport || (namedImports ? `{${namedImports}}` : "")
+            return `import ${importPart} from "./${controllerPath}"`
+          }
+        )
+
+        // 내용이 변경된 경우에만 임시로 파일에 쓰기 (Project가 읽을 수 있도록)
+        if (transformedContent !== content) {
+          await fs.writeFile(indexPath, transformedContent, "utf-8")
+          this.connection.console.log(
+            `Temporarily transformed controllers/ imports to relative paths in ${indexPath} for parsing`
+          )
+        }
+      } catch (error) {
+        // 파일이 없거나 읽을 수 없는 경우 무시
+      }
     }
   }
 
-  async parseAbsolutePathImports(content: string, indexFilePath: string) {
-    // 절대경로 import 패턴 찾기: import ... from "/controllers/..."
-    const absoluteImportRegex = /import\s+(?:(\w+)|(?:\{([^}]+)\}))\s+from\s+["'](\/[^"']+)["']/g
+  async restoreIndexFiles() {
+    // 원본 파일 내용 복원
+    const fs = await import("fs/promises")
     
-    const matches = Array.from(content.matchAll(absoluteImportRegex))
-    
-    for (const match of matches) {
-      const defaultImport = match[1]
-      const namedImports = match[2]
-      const importPath = match[3]
-      
-      // 절대경로에서 컨트롤러 파일 경로 찾기
-      const controllerPath = this.resolveAbsolutePathToController(importPath)
-      if (!controllerPath) continue
-      
-      // 절대경로로 등록된 컨트롤러로 표시
-      this.absolutePathRegisteredControllers.add(controllerPath)
-      
-      this.connection.console.log(
-        `Detected absolute path controller: ${controllerPath} from ${importPath}`
-      )
-    }
-  }
-
-  resolveAbsolutePathToController(absolutePath: string): string | null {
-    // 절대경로를 실제 파일 경로로 변환
-    // 예: /controllers/hello_controller -> app/javascript/controllers/hello_controller.js
-    const projectRoot = this.project.projectPath
-    
-    // 절대경로에서 / 제거하고 프로젝트 루트와 결합
-    const relativePath = absolutePath.startsWith("/") ? absolutePath.slice(1) : absolutePath
-    
-    // 가능한 확장자들 시도
-    const extensions = [".js", ".ts", ".jsx", ".tsx"]
-    
-    for (const ext of extensions) {
-      const fullPath = path.join(projectRoot, relativePath + ext)
-      if (this.fileExistsSync(fullPath)) {
-        return fullPath
+    for (const [indexPath, originalContent] of this.indexFileBackups.entries()) {
+      try {
+        await fs.writeFile(indexPath, originalContent, "utf-8")
+        this.connection.console.log(`Restored original content to ${indexPath}`)
+      } catch (error) {
+        this.connection.console.log(`Error restoring ${indexPath}: ${error}`)
       }
     }
     
-    // 확장자 없이도 시도
-    const fullPathWithoutExt = path.join(projectRoot, relativePath)
-    if (this.fileExistsSync(fullPathWithoutExt)) {
-      return fullPathWithoutExt
-    }
-    
-    return null
-  }
-
-  fileExistsSync(filePath: string): boolean {
-    try {
-      const fs = require("fs")
-      return fs.existsSync(filePath)
-    } catch {
-      return false
-    }
+    this.indexFileBackups.clear()
   }
 
   async refresh() {
+    // index.js 파일 임시 변환
+    await this.prepareIndexFileForParsing()
+    
     await this.project.refresh()
+
+    // 원본 파일 복원
+    await this.restoreIndexFiles()
 
     this.diagnostics.refreshAllDocuments()
   }
